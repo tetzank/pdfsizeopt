@@ -50,7 +50,9 @@ import re
 import struct
 import sys
 import time
-import zlib
+#import zlib
+from zopfli.zlib import compress
+from zlib import decompress,crc32
 
 
 class Error(Exception):
@@ -225,23 +227,7 @@ def PermissiveZlibDecompress(data):
   Raises:
     zlib.error:
   """
-  try:
-    return zlib.decompress(data)
-  except zlib.error:
-    # This works if the ADLER32 is truncated, but it raises zlib.error on any
-    # other error.
-    uncompressed = zlib.decompressobj().decompress(data)
-    adler32_data = struct.pack('>L', zlib.adler32(uncompressed))
-    try:
-      return zlib.decompress(data + adler32_data[3:])
-    except zlib.error:
-      try:
-        return zlib.decompress(data + adler32_data[2:])
-      except zlib.error:
-        try:
-          return zlib.decompress(data + adler32_data[1:])
-        except zlib.error:
-          return zlib.decompress(data + adler32_data)
+  return decompress(data)
 
 
 class PdfOptimizeError(Error):
@@ -797,7 +783,7 @@ class PdfObj(object):
     if data:
       if is_flate_ok:
         items.append([None, 'zip', PdfObj(self)])
-        items[-1][2].stream = zlib.compress(data, 9)
+        items[-1][2].stream = compress(data, numiterations=15)
         items[-1][2].Set('Length', len(items[-1][2].stream))
         items[-1][2].Set('Filter', '/FlateDecode')
         items[-1][2].Set('DecodeParms', None)
@@ -820,7 +806,7 @@ class PdfObj(object):
           output.append(b.tostring())
           i += predictor_width
         items.append([None, 'zip-pred10', PdfObj(self)])
-        items[-1][2].stream = zlib.compress(''.join(output), 9)
+        items[-1][2].stream = compress(''.join(output), numiterations=15)
         items[-1][2].Set('Length', len(items[-1][2].stream))
         items[-1][2].Set('Filter', '/FlateDecode')
         items[-1][2].Set('DecodeParms',
@@ -838,7 +824,7 @@ class PdfObj(object):
           output.append(b.tostring())
           i += predictor_width
         items.append([None, 'zip-pred2', PdfObj(self)])
-        items[-1][2].stream = zlib.compress(''.join(output), 9)
+        items[-1][2].stream = compress(''.join(output), numiterations=15)
         items[-1][2].Set('Length', len(items[-1][2].stream))
         items[-1][2].Set('Filter', '/FlateDecode')
         items[-1][2].Set('DecodeParms',
@@ -2935,7 +2921,7 @@ class PdfObj(object):
       #print 'REN', new_font_name, data.encode('hex')
 
     if is_changed:
-      self.stream = zlib.compress(data, 9)
+      self.stream = compress(data, numiterations=15)
       self.Set('Filter', '/FlateDecode')
       self.Set('DecodeParms', None)
       self.Set('Length', len(self.stream))
@@ -3299,7 +3285,7 @@ class ImageData(object):
       output.append(idat[i : i + bytes_per_row])
 
     # TODO(pts): Maybe use a smaller effort? We're not optimizing anyway.
-    self.idat = zlib.compress(''.join(output), 6)
+    self.idat = compress(''.join(output), numiterations=15)
     self.compression = 'zip-png'
     assert self
 
@@ -3317,7 +3303,7 @@ class ImageData(object):
       # TODO(pts): Optimize memory use.
       chunk_type += chunk_data
       output.append(chunk_type)
-      output.append(struct.pack('>l', zlib.crc32(chunk_type)))
+      output.append(struct.pack('>l', crc32(chunk_type)))
 
     if do_force_gray:
       assert (self.color_type.startswith('indexed-') or
@@ -3492,7 +3478,7 @@ class ImageData(object):
       if do_zip:
         compression = 'zip'
         # TODO(pts): Would a smaller effort (compression level) suffice here?
-        idat = zlib.compress(idat, 9)
+        idat = compress(idat, numiterations=15)
     elif predictor in (1, None):
       compression = 'zip'
     elif predictor == 2:
@@ -3573,7 +3559,7 @@ class ImageData(object):
         assert len(chunk_data) == chunk_data_size
         chunk_crc = f.read(4)
         assert len(chunk_crc) == 4
-        computed_crc = struct.pack('>l', zlib.crc32(chunk_type + chunk_data))
+        computed_crc = struct.pack('>l', crc32(chunk_type + chunk_data))
         assert chunk_crc == computed_crc, (
             'chunk %r checksum mismatch' % chunk_type)
         if chunk_type == 'IHDR':
@@ -6353,7 +6339,7 @@ cvx bind /LoadCff exch def
         images[obj_num].append(('parse', (image2.SavePng(
             file_name=TMP_PREFIX + 'img-%d.parse.png' % obj_num))))
         if image1.compression == 'none':
-          image1.idat = zlib.compress(image1.idat, 9)
+          image1.idat = compress(image1.idat, numiterations=15)
           image1.compression = 'zip'
         if len(image1.idat) < len(image2.idat):
           # For testing: ./pdfsizeopt.py -use-pngout=false PLRM.pdf
